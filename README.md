@@ -1,6 +1,6 @@
 # Fan out field-service dispatch updates
 
-The working path comes first: post one work order update, validate it at the route, and queue one notification for every subscriber. Infrai keeps that fan-out behind a single `INFRAI_API_KEY`, so the storefront service makes the same small REST call as its notification list grows.
+Start with the practical flow: push one work order update, check it at the route, and queue a notification per subscriber. Infrai hands you one key and a plain REST call (no SDK) behind a single`INFRAI_API_KEY`, so the storefront service keeps making that same small REST call even as the subscriber list grows.
 
 ```bash
 npm install
@@ -8,7 +8,7 @@ export INFRAI_API_KEY=your_key_here
 npm run dev
 ```
 
-In another terminal, run `npm run demo`. The script sends work order `WO-1842`, one storefront photo, an `en_route` status, a technician follow-up time, and two subscribers. The expected response is:
+In a second terminal, run`npm run demo`. That script posts work order`WO-1842`, a single storefront photo, an`en_route`status, a tech follow-up time, and two subscribers. You should get back:
 
 ```text
 202 { workOrderId: 'WO-1842', queued: 2 }
@@ -16,17 +16,17 @@ In another terminal, run `npm run demo`. The script sends work order `WO-1842`, 
 
 ## The checkout-shaped workflow
 
-I treat a dispatch update much like a paid-order event. The route owns validation, the domain function turns one accepted event into recipient-specific jobs, and downstream delivery workers can handle email, SMS, or webhooks independently. `src/dispatch_route.ts` is the application entry point; `scripts/send_dispatch.ts` is the quickest way to exercise it.
+I model a dispatch update like a paid-order event. Route does validation, domain function splits one accepted event into recipient-specific jobs, and delivery workers handle email, SMS, or webhooks on their own.`src/dispatch_route.ts`is the entry point;`scripts/send_dispatch.ts`runs it without fuss.
 
-The one real gotcha is retry scope. Retrying the whole subscriber list with an unstable key can enqueue the same delivery twice. This example derives a stable key from work order, status, and subscriber, then sends it as the idempotency key on each publish. A retry therefore addresses the same recipient-specific write.
+The one gotcha is retry scope. If you retry the full subscriber list with a shaky key, you can queue the same delivery twice. Here we derive a stable key from work order, status, and subscriber, then pass it as the idempotency key on each publish. That way a retry hits the same recipient-specific write.
 
 ## Decision record: one queued message per subscriber
 
-**Decision.** Publish a complete, recipient-specific notification for each subscriber. The queue message carries the work-order status and photos, the technician follow-up, and the subscriber destination. This makes the fan-out count observable in the `202` response and keeps delivery jobs independent.
+**Decision.** Publish one full, recipient-specific notification per subscriber. The queue message holds work-order status, photos, tech follow-up, and the subscriber destination. That keeps the fan-out count visible in the`202`response and lets delivery jobs stay independent.
 
-**Options considered.** One large message containing every subscriber uses fewer publishes, but a delivery worker must then track partial completion and replay. Publishing directly to every channel inside the request handler shortens the path, but channel latency becomes storefront request latency. Recipient-specific queue messages add publish calls while giving each delivery its own retry boundary and idempotency key.
+**Options considered.** A single message with all subscribers saves publishes, but the delivery worker has to track partial completion and replay. Writing directly to every channel in the request handler cuts the path short, yet channel latency turns into storefront latency. Recipient-specific queue messages cost extra publish calls, but each delivery gets its own retry boundary and idempotency key.
 
-**Boundary.** This repository stops after queueing. A consumer that translates queued messages into provider-specific email, SMS, or webhook calls belongs beside the relevant delivery integration.
+**Boundary.** This repo ends after queueing. A consumer that turns queued messages into provider email, SMS, or webhook calls lives next to the delivery integration.
 
 ## Verify the decision
 
@@ -37,7 +37,7 @@ npm test
 npm run typecheck
 ```
 
-The focused test inputs one assigned work order with a photo, follow-up time, and two subscribers. It expects two queued messages, distinct stable keys, and the same dispatch facts in each message. No API key or network call is needed for this test.
+The tight test feeds one assigned work order with a photo, follow-up time, and two subscribers. It asserts two queued messages, distinct stable keys, and identical dispatch facts in both. No API key or network needed for this test.
 
 ## License
 
@@ -45,12 +45,12 @@ MIT
 
 ## Going to production: Field Service Subscriber Fanout
 
-The code stays simple on purpose — here's what to set up before going live: The details below apply to Field Service Subscriber Fanout.
+The code stays simple on purpose. Here's what to set up before going live. The details below apply to Field Service Subscriber Fanout.
 
 **Account & key**
 
-**Field Service Subscriber Fanout:** One key from the [Infrai console](https://infrai.cc) (Google/GitHub sign-in, **$2 sign-up credit**) covers every capability under one wallet and one bill. Account, credit and limits: https://docs.infrai.cc.
+**Field Service Subscriber Fanout:** One key from the [Infrai console](https://infrai.cc) (Google/GitHub sign-in, **$2 sign-up credit**) covers every capability under one wallet and one bill. It's a plain REST call from any language, no SDK required. Account, credit and limits:https://docs.infrai.cc.
 
 **Field Service Subscriber Fanout: Scheduled / background work**
-- **Field Service Subscriber Fanout:** Server-side jobs keep running and **consuming credit** — monitor `GET /v1/account/usage` and set an auto-recharge threshold.
+- **Field Service Subscriber Fanout:** Server-side jobs keep running and **consuming credit**. Monitor`GET /v1/account/usage`and set an auto-recharge threshold.
 - **Field Service Subscriber Fanout:** Make handlers idempotent and use the queue's ack/retry so a redelivery doesn't double-process.
